@@ -1,0 +1,66 @@
+name: Deploy to AWS EC2 (qa)
+
+on:
+  push:
+    branches: [qa]
+
+concurrency:
+  group: deploy-qa
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: qa
+    env:
+      APP_DIR: /home/${{ secrets.EC2_USER }}/pd-lab
+      COMPOSE_PROJECT: pd-lab
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Create .env
+        run: |
+          cat > .env.deploy <<ENV
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_PORT=5432
+          PORT=3000
+          ENV
+
+      - name: Sync files to EC2
+        run: |
+          SSH="ssh -i ~/.ssh/id_ed25519"
+          TARGET="${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
+          $SSH $TARGET "mkdir -p $APP_DIR"
+          rsync -az --delete -e "$SSH" \
+            --exclude '.git' --exclude '.github' --exclude 'node_modules' \
+            --exclude 'dist' --exclude '.env' --exclude '.env.deploy' \
+            ./ $TARGET:$APP_DIR/
+          scp -i ~/.ssh/id_ed25519 .env.deploy $TARGET:$APP_DIR/.env
+
+      - name: Build and start containers
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd ~/pd-lab
+          chmod 600 .env
+          docker compose -p pd-lab -f infrastructure/docker-compose.yml --env-file .env up --build -d --remove-orphans
+          docker image prune -f
+          REMOTE
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "http://${{ secrets.EC2_HOST }}/api/health/db"; then exit 0; fi
+            echo "Waiting for the stack ($i/12)..."
+            sleep 10
+          done
+          exit 1
