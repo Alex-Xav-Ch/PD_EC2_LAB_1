@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [qa]
+
+jobs:
+  check-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only allow dev -> qa
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "Pull requests to qa must come from dev (got ${{ github.head_ref }})"
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+
+      - name: Validate compose file
+        run: docker compose -f infrastructure/docker-compose.yml config -q
+        env:
+          POSTGRES_DB: ci
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+
+      - name: Build images
+        run: |
+          docker build -f services/backend/Dockerfile -t backend:ci .
+          docker build -f apps/web/Dockerfile -t web:ci .

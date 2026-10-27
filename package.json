@@ -1,0 +1,9 @@
+{
+  "name": "PD_EC2_LAB_1",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:backend": "pnpm --filter backend dev",
+    "build": "pnpm -r build"
+  }
+}
