@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           cd ~/pd-lab
           chmod 600 .env
-          docker compose -p pd-lab -f infrastructure/docker-compose.yml --env-file .env up --build -d --remove-orphans
+          COMPOSE_PARALLEL_LIMIT=1 docker compose -p pd-lab -f infrastructure/docker-compose.yml --env-file .env up --build -d --remove-orphans
           docker image prune -f
           REMOTE
 
